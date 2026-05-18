@@ -10,10 +10,12 @@ MAX_TURNS = 5
 
 class Agent:
     def __init__(self, base_url: str = "https://api.deepseek.com/v1",
-                 model: str = "deepseek-chat", api_key: str = ""):
+                 model: str = "deepseek-chat", api_key: str = "",
+                 confirm_callback=None):
         self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self.model = model
         self.messages: list[dict] = []
+        self.confirm_callback = confirm_callback  # 为 None 则用 input()
 
     def _init_messages(self, user_msg: str):
         self.messages = [
@@ -88,8 +90,13 @@ class Agent:
                         print(f"⚠ 即将执行: {tool_name}({tool_args})")
 
                 if needs_confirm:
-                    ok = input("确认执行? (y/n): ").strip().lower()
-                    if ok != "y":
+                    if self.confirm_callback:
+                        ok = await self.confirm_callback(tasks)
+                        approved = ok is True or str(ok).strip().lower() in ("y", "yes")
+                    else:
+                        ok = input("确认执行? (y/n): ").strip().lower()
+                        approved = ok in ("y", "yes")
+                    if not approved:
                         result = "用户取消了操作"
                         print(f"[工具返回] {result}")
                         for tc, _, _ in tasks:

@@ -13,11 +13,17 @@ from agent import Agent
 from judge import Judge
 
 
+async def auto_confirm(tasks) -> bool:
+    """eval 模式自动确认所有需要确认的操作"""
+    for _, tool_name, tool_args in tasks:
+        print(f"  [自动确认] {tool_name}({tool_args})")
+    return True
+
+
 async def run_case(agent: Agent, case: dict) -> str:
     """运行单个测试用例，返回 agent 回答"""
     captured = StringIO()
 
-    # 捕获 stdout，屏蔽 agent 内部打印
     import builtins
     original_print = builtins.print
 
@@ -29,17 +35,11 @@ async def run_case(agent: Agent, case: dict) -> str:
 
     builtins.print = _capture
 
-    # 自动确认 y
-    original_input = builtins.input
-    builtins.input = lambda _="": "y"
-
     try:
         answer = await agent.run(case["question"])
     finally:
         builtins.print = original_print
-        builtins.input = original_input
 
-    # 从捕获的日志中提取工具调用信息
     logs = captured.getvalue()
     tools_used = []
     for tool_name in ["search_knowledge", "calculator",
@@ -58,14 +58,13 @@ async def main():
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("LLM_MODEL", "deepseek-chat")
 
-    # 加载测试用例
     cases_path = Path(__file__).parent / "test_cases.json"
     cases = json.loads(cases_path.read_text(encoding="utf-8"))
 
     print(f"加载了 {len(cases)} 个测试用例\n")
 
-    # 初始化 agent 和 judge
-    agent = Agent(base_url=base_url, model=model, api_key=api_key)
+    agent = Agent(base_url=base_url, model=model, api_key=api_key,
+                  confirm_callback=auto_confirm)
     judge = Judge(base_url=base_url, model=model, api_key=api_key)
 
     results = []
@@ -77,7 +76,7 @@ async def main():
 
         answer = await run_case(agent, case)
         if answer:
-            answer = answer[:2000]  # 截断过长回答
+            answer = answer[:2000]
 
         print(f"  评分中...")
         scores = await judge.score(
@@ -101,7 +100,6 @@ async def main():
               f"R{scores.get('citation')} H{scores.get('honesty')}")
         print()
 
-    # 汇总报告
     n = len(results)
     print("=" * 50)
     print("评估汇总报告")
@@ -116,7 +114,6 @@ async def main():
     print(f"  综合:     {overall:.1f}/5")
     print()
 
-    # 保存详细报告
     report_path = Path(__file__).parent / "report.json"
     report_path.write_text(
         json.dumps(results, ensure_ascii=False, indent=2),
