@@ -4,3 +4,5 @@ __pycache__/
 .env
 workspace/
 .idea/
+knowledge/.cache_checksum
+knowledge/.chromadb/
