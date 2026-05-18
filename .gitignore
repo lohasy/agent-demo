@@ -6,3 +6,4 @@ workspace/
 .idea/
 knowledge/.cache_checksum
 knowledge/.chromadb/
+eval/report.json

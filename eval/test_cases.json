@@ -1,0 +1,62 @@
+[
+  {
+    "id": "annual_leave_basic",
+    "question": "公司年假怎么算",
+    "expect_tools": ["search_knowledge"],
+    "check_points": [
+      "入职满1年享有5天年假",
+      "每增加1年增加1天",
+      "上限15天",
+      "提到信息来源或出处"
+    ],
+    "forbidden": ["编造", "不清楚"]
+  },
+  {
+    "id": "sick_leave_policy",
+    "question": "生病了请假需要什么证明",
+    "expect_tools": ["search_knowledge"],
+    "check_points": [
+      "提到病假条或医院证明",
+      "提到带薪病假天数或规则"
+    ],
+    "forbidden": ["不清楚", "没有相关信息"]
+  },
+  {
+    "id": "calculator_math",
+    "question": "帮我算 (45 + 55) * 3.14",
+    "expect_tools": ["calculator"],
+    "check_points": ["314", "使用计算器"],
+    "forbidden": []
+  },
+  {
+    "id": "expense_approval",
+    "question": "我报销600元钱需要谁审批",
+    "expect_tools": ["search_knowledge"],
+    "check_points": [
+      "部门总监",
+      "500-5000元"
+    ],
+    "forbidden": ["不清楚"]
+  },
+  {
+    "id": "overtime_policy",
+    "question": "周六加班工资怎么算",
+    "expect_tools": ["search_knowledge"],
+    "check_points": [
+      "休息日加班2倍",
+      "使用工具查询"
+    ],
+    "forbidden": []
+  },
+  {
+    "id": "mixed_leave_calc",
+    "question": "我入职3年了，想请7天年假，能请吗",
+    "expect_tools": ["search_knowledge", "calculator"],
+    "check_points": [
+      "入职3年应有7天年假",
+      "7天年假可以请",
+      "使用知识库"
+    ],
+    "forbidden": ["编造"]
+  }
+]
