@@ -2,7 +2,7 @@ import asyncio
 import json
 from openai import AsyncOpenAI
 from prompts import SYSTEM_PROMPT
-from tools import TOOLS, get_tool
+from tools import get_all_tools, get_tool_definition, execute as tool_execute
 from context import trim
 
 MAX_TURNS = 5
@@ -36,7 +36,7 @@ class Agent:
         stream = await self.client.chat.completions.create(
             model=self.model,
             messages=self.messages,
-            tools=TOOLS,
+            tools=get_all_tools(),
             stream=True,
         )
 
@@ -88,8 +88,8 @@ class Agent:
 
                 needs_confirm = False
                 for tc, tool_name, tool_args in tasks:
-                    tool = get_tool(tool_name)
-                    if tool and tool.get("confirm"):
+                    tdef = get_tool_definition(tool_name)
+                    if tdef and tdef.get("confirm"):
                         needs_confirm = True
                         await self._emit("confirm_required", {
                             "name": tool_name, "args": tool_args,
@@ -121,13 +121,7 @@ class Agent:
                         continue
 
                 async def _exec(tc, tool_name, tool_args):
-                    tool = get_tool(tool_name)
-                    if not tool:
-                        result = f"错误: 没有名为 '{tool_name}' 的工具"
-                    else:
-                        mod = __import__(f"tools.{tool_name}",
-                                         fromlist=["execute"])
-                        result = mod.execute(**tool_args)
+                    result = await tool_execute(tool_name, tool_args)
                     return tc, tool_name, tool_args, result
 
                 results = await asyncio.gather(

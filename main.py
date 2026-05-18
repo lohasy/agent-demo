@@ -1,7 +1,10 @@
 import asyncio
 import os
+import sys
 from agent import Agent
 from rag_service import index_documents
+from mcp_client import mcp_client
+from tools import set_mcp_client, refresh_mcp_tools, get_all_tools
 
 
 def cli_event_handler(event_type: str, data: dict):
@@ -38,6 +41,14 @@ async def main():
     print(f"LLM: {base_url} | 模型: {model}")
     print("正在索引知识库文档...")
     index_documents()
+
+    # 连接 MCP Server
+    from pathlib import Path
+    server_script = str(Path(__file__).parent / "mcp_servers" / "company_server.py")
+    await mcp_client.connect("company", sys.executable, [server_script])
+    set_mcp_client(mcp_client)
+    await refresh_mcp_tools()
+    print(f"MCP 工具: {[t['function']['name'] for t in get_all_tools()]}")
     print("输入 'quit' 退出\n")
 
     agent = Agent(base_url=base_url, model=model, api_key=api_key,

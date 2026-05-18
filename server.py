@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import sys
 import uuid
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 
 from agent import Agent
 from rag_service import index_documents
+from mcp_client import mcp_client
+from tools import set_mcp_client, refresh_mcp_tools
 
 
 sessions: dict[str, dict] = {}
@@ -21,7 +24,14 @@ sessions: dict[str, dict] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     index_documents()
+    # 连接 MCP Server
+    from pathlib import Path
+    server_script = str(Path(__file__).parent / "mcp_servers" / "company_server.py")
+    await mcp_client.connect("company", sys.executable, [server_script])
+    set_mcp_client(mcp_client)
+    await refresh_mcp_tools()
     yield
+    await mcp_client.close()
 
 
 app = FastAPI(lifespan=lifespan)
