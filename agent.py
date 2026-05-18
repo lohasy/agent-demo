@@ -1,3 +1,4 @@
+import asyncio
 import json
 from openai import AsyncOpenAI
 from prompts import SYSTEM_PROMPT
@@ -70,11 +71,43 @@ class Agent:
 
             # LLM 决定调用工具
             if tool_calls:
+                # 解析所有工具调用
+                tasks = []
                 for tc in tool_calls:
                     tool_name = tc["function"]["name"]
                     tool_args = json.loads(tc["function"]["arguments"])
                     print(f"[调用工具] {tool_name}({tool_args})")
+                    tasks.append((tc, tool_name, tool_args))
 
+                # 检查是否有需要确认的操作
+                needs_confirm = False
+                for tc, tool_name, tool_args in tasks:
+                    tool = get_tool(tool_name)
+                    if tool and tool.get("confirm"):
+                        needs_confirm = True
+                        print(f"⚠ 即将执行: {tool_name}({tool_args})")
+
+                if needs_confirm:
+                    ok = input("确认执行? (y/n): ").strip().lower()
+                    if ok != "y":
+                        result = "用户取消了操作"
+                        print(f"[工具返回] {result}")
+                        for tc, _, _ in tasks:
+                            self.messages.append({
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [tc],
+                            })
+                            self.messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": result,
+                            })
+                        self.messages = trim(self.messages)
+                        continue
+
+                # 并行执行所有工具
+                async def _exec(tc, tool_name, tool_args):
                     tool = get_tool(tool_name)
                     if not tool:
                         result = f"错误: 没有名为 '{tool_name}' 的工具"
@@ -82,9 +115,14 @@ class Agent:
                         mod = __import__(f"tools.{tool_name}",
                                          fromlist=["execute"])
                         result = mod.execute(**tool_args)
+                    return tc, tool_name, tool_args, result
 
-                    print(f"[工具返回] {result}")
+                results = await asyncio.gather(
+                    *[_exec(tc, name, args) for tc, name, args in tasks]
+                )
 
+                for tc, tool_name, tool_args, result in results:
+                    print(f"[工具返回] ({tool_name}) {result}")
                     self.messages.append({
                         "role": "assistant",
                         "content": None,
@@ -95,7 +133,7 @@ class Agent:
                         "tool_call_id": tc["id"],
                         "content": result,
                     })
-                    self.messages = trim(self.messages)
+                self.messages = trim(self.messages)
                 continue
 
             # LLM 决定直接回答 — 流式输出
