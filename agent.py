@@ -2,6 +2,7 @@ import json
 from openai import AsyncOpenAI
 from prompts import SYSTEM_PROMPT
 from tools import TOOLS, get_tool
+from context import trim
 
 MAX_TURNS = 5
 
@@ -94,6 +95,7 @@ class Agent:
                         "tool_call_id": tc["id"],
                         "content": result,
                     })
+                    self.messages = trim(self.messages)
                 continue
 
             # LLM 决定直接回答 — 流式输出
@@ -112,6 +114,7 @@ class Agent:
             "role": "user",
             "content": "你已经达到了最大思考轮次，请根据上述所有工具返回的结果，给用户一个总结回答。"
         })
+        self.messages = trim(self.messages)
         content, _ = await self._stream_llm()
         if content:
             print("[Agent 总结] ", end="", flush=True)
