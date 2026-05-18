@@ -47,8 +47,7 @@ def _get_or_create_session(session_id: str | None) -> tuple[str, dict]:
     if session_id and session_id in sessions:
         return session_id, sessions[session_id]
     sid = session_id or str(uuid.uuid4())[:8]
-    api_key = os.getenv("DEEPSEEK_API_KEY",
-                         "sk-b129d5d0e73c4345be4bfd4388f358b9")
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("LLM_MODEL", "deepseek-chat")
 

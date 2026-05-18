@@ -29,7 +29,7 @@ def cli_event_handler(event_type: str, data: dict):
 async def main():
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("LLM_MODEL", "deepseek-chat")
-    api_key = os.getenv("DEEPSEEK_API_KEY", "sk-b129d5d0e73c4345be4bfd4388f358b9")
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
 
     if not api_key:
         print("错误: 请设置环境变量 DEEPSEEK_API_KEY")
