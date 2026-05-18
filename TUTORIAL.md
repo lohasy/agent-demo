@@ -1,6 +1,6 @@
 # 从零构建 AI Agent — 完整教学指南
 
-本教程带你从零开始，手把手构建一个企业内部智能助手 Agent，涵盖 7 个学习阶段。
+本教程带你从零开始，手把手构建一个企业内部智能助手 Agent，涵盖 8 个学习阶段。
 
 ## 项目总览
 
@@ -19,6 +19,9 @@ agent-demo/
 │   ├── search_knowledge.py # 知识库搜索
 │   ├── submit_leave.py   #   请假申请（需确认）
 │   └── __init__.py       #   工具注册
+├── mcp_client.py         # MCP 客户端（JSON-RPC over stdio）
+│   ├── mcp_servers/          # MCP Server 示例
+│   │   └── company_server.py #   公司数据查询服务
 ├── eval/                 # 评估体系
 │   ├── test_cases.json   #   测试用例
 │   ├── runner.py         #   批量运行
@@ -372,6 +375,208 @@ while (true) {
 
 ---
 
+## 阶段 8：MCP 协议集成
+
+### 什么是 MCP
+
+MCP（Model Context Protocol）是 Anthropic 提出的标准化工具协议。核心思想：**让 LLM 以统一的方式发现和调用外部工具，不管工具实现在哪里、用什么语言写的**。
+
+类比：MCP 之于 Agent 工具，就像 USB 之于外设 —— 不管插什么设备，接口统一。
+
+### 为什么不用 MCP 官方 SDK
+
+尝试了 `mcp` Python SDK，在 Windows 上遇到异步上下文管理器兼容性问题：
+
+```
+Attempted to exit cancel scope in a different task
+BrokenResourceError: Connection closed
+```
+
+这是 anyio/trio 在 Windows 事件循环上的已知问题。解决方案：**回归本质，手写 JSON-RPC 2.0 over stdio**。
+
+### 架构
+
+```
+┌──────────────┐                    ┌────────────────────┐
+│   Agent      │                    │  MCP Server         │
+│              │  1. tools/list     │  (company_server)   │
+│  tool_exec() ├──────────────────►│                     │
+│              │◄──────────────────┤  暴露:               │
+│              │  [tool_defs...]    │  - lookup_employee  │
+│              │                    │  - lookup_department│
+│              │  2. tools/call     │                     │
+│              ├──────────────────►│                     │
+│              │◄──────────────────┤                     │
+│              │  {content: [...]}  │                     │
+└──────────────┘                    └────────────────────┘
+        ▲
+        │ 统一注册 (tools/__init__.py)
+        │
+  ┌─────┴─────┐
+  │ 本地工具    │
+  │ calculator │
+  │ filesystem │
+  │ ...        │
+  └───────────┘
+```
+
+### JSON-RPC 2.0 协议
+
+MCP 基于 JSON-RPC 2.0，每条消息一行 JSON，以 `\n` 分隔：
+
+**Request（客户端 → 服务端）：**
+
+```json
+{"jsonrpc": "2.0", "id": "a1b2c3", "method": "tools/list", "params": {}}
+```
+
+**Response（服务端 → 客户端）：**
+
+```json
+{"jsonrpc": "2.0", "id": "a1b2c3", "result": {"tools": [...]}}
+```
+
+**Notification（客户端 → 服务端，无 id，服务端不回复）：**
+
+```json
+{"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}}
+```
+
+### MCPClient 实现：`mcp_client.py`
+
+**初始化握手三次：**
+
+```python
+async def connect(self, name, command, args):
+    proc = await asyncio.create_subprocess_exec(        # 启动子进程
+        command, *args, stdin=PIPE, stdout=PIPE, stderr=PIPE,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, # Windows 必须设 UTF-8
+    )
+    # ① initialize
+    await self._send(proc, "initialize", {"protocolVersion": "2024-11-05", ...})
+    init_resp = await self._recv(proc)                   # → {serverInfo, capabilities}
+
+    # ② initialized (notification: 无 id，服务端不回复)
+    await self._send(proc, "notifications/initialized", {}, is_notification=True)
+```
+
+**工具发现：**
+
+```python
+async def list_tools(self):
+    resp = await self._send_recv(conn["proc"], "tools/list", {})
+    for tool in resp["result"]["tools"]:
+        all_tools.append({
+            "type": "function",
+            "function": {
+                "name": f"mcp_{server_name}_{tool['name']}",  # 加前缀防冲突
+                "description": tool["description"],
+                "parameters": tool["inputSchema"],             # 直接透传
+            }
+        })
+```
+
+**工具调用：**
+
+```python
+async def call_tool(self, full_name, args):
+    server_name, tool_name = parse_full_name(full_name)  # 解析 mcp_company_xxx
+    resp = await self._send_recv(conn["proc"], "tools/call", {
+        "name": tool_name, "arguments": args,
+    })
+    # 提取所有 text 类型内容
+    for item in resp["result"]["content"]:
+        if item["type"] == "text":
+            texts.append(item["text"])
+    return "\n".join(texts)
+```
+
+### MCP Server 示例：`company_server.py`
+
+Server 端极简 —— 一个 `for line in sys.stdin` 循环：
+
+```python
+def handle_request(req):
+    method = req.get("method", "")
+    if method == "initialize":
+        return {"protocolVersion": "2024-11-05", "serverInfo": {...}, ...}
+    if method == "tools/list":
+        return {"tools": TOOLS}                     # 返回工具定义列表
+    if method == "tools/call":
+        name = req["params"]["name"]
+        args = req["params"]["arguments"]
+        return execute_tool(name, args)             # 执行并返回 {content: [...]}
+
+def main():
+    for line in sys.stdin:
+        req = json.loads(line)
+        if "id" not in req:
+            continue                                # notification，不回复
+        resp = handle_request(req)
+        sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": req["id"],
+                                     "result": resp}) + "\n")
+```
+
+### 统一工具注册：`tools/__init__.py`
+
+核心数据结构：
+
+```python
+_tool_registry = {}       # name → (is_async, callable)
+_mcp_tool_defs = []       # MCP 工具定义（OpenAI 格式）
+LOCAL_TOOLS = [...]       # 本地工具定义
+```
+
+```
+                    get_all_tools()
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+         LOCAL_TOOLS          _mcp_tool_defs
+       (本地硬编码)            (MCP 动态发现)
+```
+
+**执行分发：**
+
+```python
+async def execute(name, args):
+    is_async, fn = _tool_registry[name]
+    if is_async:
+        return await _mcp_client.call_tool(name, args)   # MCP → 走子进程
+    else:
+        return fn(**args)                                # 本地 → 直接调用
+```
+
+对 Agent 来说，它只调用 `tool_execute(name, args)`，完全不知道工具是本地函数还是远程子进程 —— 这就是标准化的价值。
+
+### 适配 fast-mcp（可选）
+
+我们手写了 118 行的 `company_server.py`。如果用社区库 [fast-mcp](https://github.com/jlowin/fastmcp)（Jeremiah Lowin 开发），可以简化为：
+
+```python
+from fastmcp import FastMCP
+
+mcp = FastMCP("company-server")
+
+@mcp.tool()
+def lookup_employee(name: str) -> str:
+    """查询员工信息"""
+    emp = EMPLOYEES.get(name)
+    return f"员工: {name}\n..." if emp else f"未找到员工 '{name}'"
+
+mcp.run()
+```
+
+装饰器自动生成 JSON-RPC 处理逻辑、inputSchema、参数校验。Client 端代码不变。
+
+### 踩坑记录
+
+1. **Windows 编码**：子进程默认输出 GBK，客户端 UTF-8 解码报错 → 设置 `PYTHONIOENCODING=utf-8`
+2. **通知污染管道**：`notifications/initialized` 发送后服务端回复了 error 响应，`list_tools` 读到了这个旧响应 → 改为真正的 JSON-RPC notification（不带 `id`）
+3. **MCP SDK 兼容性**：官方 SDK 在 Windows 上有 async 问题 → 放弃 SDK，手写 120 行原始协议
+
+---
+
 ## 运行指南
 
 ### 环境准备
@@ -419,6 +624,7 @@ python eval/runner.py
 | 5 | `agent.py` + `tools/leave.py` | asyncio.gather、确认模式 |
 | 6 | `eval/` | LLM-as-Judge、测试用例设计 |
 | 7 | `server.py` + `frontend/` | SSE、Vue 3、会话管理 |
+| 8 | `mcp_client.py` + `mcp_servers/` | MCP 协议、JSON-RPC、子进程通信 |
 
 ## 关键设计原则
 
