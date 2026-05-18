@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import os
 import sys
@@ -5,6 +6,7 @@ from agent import Agent
 from rag_service import index_documents
 from mcp_client import mcp_client
 from tools import set_mcp_client, refresh_mcp_tools, get_all_tools
+from orchestrator import create_orchestrator
 
 
 def cli_event_handler(event_type: str, data: dict):
@@ -27,9 +29,43 @@ def cli_event_handler(event_type: str, data: dict):
         print()
     elif event_type == "max_turns":
         print("\n[Agent 达到最大轮次限制，强制总结]")
+    elif event_type == "worker_start":
+        print(f"\n{'='*30} [工作者: {data['worker']}] {'='*30}")
+        print(f"  任务: {data['task']}")
+    elif event_type == "worker_event":
+        _print_worker_event(data["worker"], data["type"], data["data"])
+    elif event_type == "worker_end":
+        print(f"\n{'='*30} [工作者: {data['worker']}] 完成 {'='*30}")
+        result_preview = str(data.get("result", ""))[:200]
+        if result_preview:
+            print(f"  结果: {result_preview}")
+    elif event_type == "worker_error":
+        print(f"\n[工作者: {data['worker']}] 错误: {data['error']}")
+
+
+def _print_worker_event(worker: str, event_type: str, data: dict):
+    prefix = f"  [{worker}] "
+    if event_type == "turn":
+        print(f"{prefix}--- 第 {data['n']} 轮 ---")
+    elif event_type == "tool_start":
+        print(f"{prefix}调用: {data['name']}({data['args']})")
+    elif event_type == "tool_result":
+        result_str = str(data.get("result", ""))[:150]
+        print(f"{prefix}返回: {result_str}")
+    elif event_type == "token":
+        print(data["text"], end="", flush=True)
+    elif event_type == "context_trimmed":
+        print(f"{prefix}[裁剪了 {data['count']} 条消息]")
+    elif event_type == "max_turns":
+        print(f"{prefix}[达到最大轮次，强制总结]")
 
 
 async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mode", choices=["single", "orchestrator"],
+                        default="single", help="Agent 运行模式")
+    args, _ = parser.parse_known_args()
+
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("LLM_MODEL", "deepseek-chat")
     api_key = os.getenv("DEEPSEEK_API_KEY", "")
@@ -51,8 +87,13 @@ async def main():
     print(f"MCP 工具: {[t['function']['name'] for t in get_all_tools()]}")
     print("输入 'quit' 退出\n")
 
-    agent = Agent(base_url=base_url, model=model, api_key=api_key,
-                  on_event=cli_event_handler)
+    if args.mode == "orchestrator":
+        print("模式: 多智能体编排器\n")
+        agent = create_orchestrator(base_url=base_url, model=model, api_key=api_key,
+                                    on_event=cli_event_handler)
+    else:
+        agent = Agent(base_url=base_url, model=model, api_key=api_key,
+                      on_event=cli_event_handler)
 
     while True:
         try:

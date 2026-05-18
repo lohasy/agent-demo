@@ -16,6 +16,7 @@ from agent import Agent
 from rag_service import index_documents
 from mcp_client import mcp_client
 from tools import set_mcp_client, refresh_mcp_tools
+from orchestrator import create_orchestrator
 
 
 sessions: dict[str, dict] = {}
@@ -46,6 +47,7 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+    orchestrator: bool = False
 
 
 class ConfirmRequest(BaseModel):
@@ -53,7 +55,8 @@ class ConfirmRequest(BaseModel):
     approved: bool
 
 
-def _get_or_create_session(session_id: str | None) -> tuple[str, dict]:
+def _get_or_create_session(session_id: str | None,
+                           orchestrator_mode: bool = False) -> tuple[str, dict]:
     if session_id and session_id in sessions:
         return session_id, sessions[session_id]
     sid = session_id or str(uuid.uuid4())[:8]
@@ -76,10 +79,16 @@ def _get_or_create_session(session_id: str | None) -> tuple[str, dict]:
         await confirm_event.wait()
         return confirm_result["approved"]
 
-    agent = Agent(
-        base_url=base_url, model=model, api_key=api_key,
-        on_event=on_event, confirm_callback=on_confirm,
-    )
+    if orchestrator_mode:
+        agent = create_orchestrator(
+            base_url=base_url, model=model, api_key=api_key,
+            on_event=on_event, confirm_callback=on_confirm,
+        )
+    else:
+        agent = Agent(
+            base_url=base_url, model=model, api_key=api_key,
+            on_event=on_event, confirm_callback=on_confirm,
+        )
 
     session = {
         "agent": agent, "queue": queue,
@@ -97,7 +106,8 @@ async def new_session():
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    sid, session = _get_or_create_session(req.session_id)
+    sid, session = _get_or_create_session(req.session_id,
+                                          orchestrator_mode=req.orchestrator)
     agent: Agent = session["agent"]
     queue: asyncio.Queue = session["queue"]
 

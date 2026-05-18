@@ -11,21 +11,38 @@ MAX_TURNS = 5
 class Agent:
     def __init__(self, base_url: str = "https://api.deepseek.com/v1",
                  model: str = "deepseek-chat", api_key: str = "",
-                 confirm_callback=None, on_event=None):
+                 confirm_callback=None, on_event=None,
+                 system_prompt: str = None,
+                 allowed_tools: list[str] = None,
+                 extra_tools: list[dict] = None,
+                 tool_executors: dict = None):
         self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self.model = model
         self.messages: list[dict] = []
         self.confirm_callback = confirm_callback
         self.on_event = on_event or (lambda t, d: None)
+        self.system_prompt = system_prompt
+        self._allowed_tool_names = allowed_tools
+        self.extra_tools = extra_tools
+        self.tool_executors = tool_executors
 
     async def _emit(self, event_type: str, data: dict):
         result = self.on_event(event_type, data)
         if asyncio.iscoroutine(result):
             await result
 
+    def _get_tools(self) -> list[dict]:
+        tools = get_all_tools()
+        if self._allowed_tool_names is not None:
+            name_set = set(self._allowed_tool_names)
+            tools = [t for t in tools if t["function"]["name"] in name_set]
+        if self.extra_tools:
+            tools = list(tools) + list(self.extra_tools)
+        return tools
+
     def _init_messages(self, user_msg: str):
         self.messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self.system_prompt or SYSTEM_PROMPT},
             {"role": "user", "content": user_msg},
         ]
 
@@ -36,7 +53,7 @@ class Agent:
         stream = await self.client.chat.completions.create(
             model=self.model,
             messages=self.messages,
-            tools=get_all_tools(),
+            tools=self._get_tools(),
             stream=True,
         )
 
@@ -121,7 +138,10 @@ class Agent:
                         continue
 
                 async def _exec(tc, tool_name, tool_args):
-                    result = await tool_execute(tool_name, tool_args)
+                    if self.tool_executors and tool_name in self.tool_executors:
+                        result = await self.tool_executors[tool_name](tool_args)
+                    else:
+                        result = await tool_execute(tool_name, tool_args)
                     return tc, tool_name, tool_args, result
 
                 results = await asyncio.gather(

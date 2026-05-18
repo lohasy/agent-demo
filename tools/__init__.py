@@ -45,6 +45,12 @@ def get_all_tools() -> list[dict]:
     return list(LOCAL_TOOLS) + list(_mcp_tool_defs)
 
 
+def get_tools_by_names(names: list[str]) -> list[dict]:
+    """根据名称列表过滤工具定义"""
+    name_set = set(names)
+    return [t for t in get_all_tools() if t["function"]["name"] in name_set]
+
+
 def get_tool_definition(name: str):
     """根据名称获取工具定义（OpenAI 格式）"""
     for t in get_all_tools():
