@@ -1,5 +1,7 @@
 """LLM-as-Judge: 用另一个 LLM 给 agent 回答打分"""
 
+import json
+import re
 from openai import AsyncOpenAI
 
 JUDGE_PROMPT = """你是一个评估专家，负责给 AI 助手的回答打分。
@@ -26,7 +28,7 @@ AI 助手的回答:
 {answer}
 
 ## 输出格式
-请严格按以下 JSON 格式输出，不要输出其他内容：
+请严格按以下 JSON 格式输出，不要输出其他内容。summary 中不要使用双引号，用单引号代替。
 {{"accuracy": 5, "completeness": 4, "citation": 3, "honesty": 5, "summary": "一句话评价"}}
 """
 
@@ -49,13 +51,23 @@ class Judge:
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
         )
 
-        import json
         raw = response.choices[0].message.content
+
+        # 尝试直接解析
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            return {"accuracy": 0, "completeness": 0, "citation": 0,
-                    "honesty": 0, "summary": f"JSON解析失败: {raw[:100]}"}
+            pass
+
+        # 尝试从文本中提取 JSON 对象
+        match = re.search(r'\{[^}]*"accuracy"[^}]*\}', raw, re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+
+        return {"accuracy": 0, "completeness": 0, "citation": 0,
+                "honesty": 0, "summary": f"JSON解析失败: {raw[:100]}"}

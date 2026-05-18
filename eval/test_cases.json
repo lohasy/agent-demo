@@ -58,5 +58,16 @@
       "使用知识库"
     ],
     "forbidden": ["编造"]
+  },
+  {
+    "id": "submit_leave_confirm",
+    "question": "帮我提交请假申请，5月20号开始请3天年假",
+    "expect_tools": ["submit_leave"],
+    "check_points": [
+      "调用了submit_leave",
+      "包含开始日期、天数、原因",
+      "显示提交状态或等待审批"
+    ],
+    "forbidden": ["不清楚", "无法提交"]
   }
 ]
