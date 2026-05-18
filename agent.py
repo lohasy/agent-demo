@@ -11,11 +11,17 @@ MAX_TURNS = 5
 class Agent:
     def __init__(self, base_url: str = "https://api.deepseek.com/v1",
                  model: str = "deepseek-chat", api_key: str = "",
-                 confirm_callback=None):
+                 confirm_callback=None, on_event=None):
         self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self.model = model
         self.messages: list[dict] = []
-        self.confirm_callback = confirm_callback  # 为 None 则用 input()
+        self.confirm_callback = confirm_callback
+        self.on_event = on_event or (lambda t, d: None)
+
+    async def _emit(self, event_type: str, data: dict):
+        result = self.on_event(event_type, data)
+        if asyncio.iscoroutine(result):
+            await result
 
     def _init_messages(self, user_msg: str):
         self.messages = [
@@ -24,7 +30,6 @@ class Agent:
         ]
 
     async def _stream_llm(self) -> tuple[str, list[dict] | None]:
-        """调用 LLM 流式接口，返回 (文本内容, 工具调用列表)"""
         content_parts = []
         tc_map: dict[int, dict] = {}
 
@@ -67,27 +72,28 @@ class Agent:
         self._init_messages(user_msg)
 
         for turn in range(MAX_TURNS):
-            print(f"\n--- 第 {turn + 1} 轮思考 ---")
+            await self._emit("turn", {"n": turn + 1})
 
             content, tool_calls = await self._stream_llm()
 
-            # LLM 决定调用工具
             if tool_calls:
-                # 解析所有工具调用
                 tasks = []
                 for tc in tool_calls:
                     tool_name = tc["function"]["name"]
                     tool_args = json.loads(tc["function"]["arguments"])
-                    print(f"[调用工具] {tool_name}({tool_args})")
+                    await self._emit("tool_start", {
+                        "name": tool_name, "args": tool_args,
+                    })
                     tasks.append((tc, tool_name, tool_args))
 
-                # 检查是否有需要确认的操作
                 needs_confirm = False
                 for tc, tool_name, tool_args in tasks:
                     tool = get_tool(tool_name)
                     if tool and tool.get("confirm"):
                         needs_confirm = True
-                        print(f"⚠ 即将执行: {tool_name}({tool_args})")
+                        await self._emit("confirm_required", {
+                            "name": tool_name, "args": tool_args,
+                        })
 
                 if needs_confirm:
                     if self.confirm_callback:
@@ -98,11 +104,12 @@ class Agent:
                         approved = ok in ("y", "yes")
                     if not approved:
                         result = "用户取消了操作"
-                        print(f"[工具返回] {result}")
+                        await self._emit("tool_result", {
+                            "name": tasks[0][1], "result": result,
+                        })
                         for tc, _, _ in tasks:
                             self.messages.append({
-                                "role": "assistant",
-                                "content": None,
+                                "role": "assistant", "content": None,
                                 "tool_calls": [tc],
                             })
                             self.messages.append({
@@ -110,10 +117,9 @@ class Agent:
                                 "tool_call_id": tc["id"],
                                 "content": result,
                             })
-                        self.messages = trim(self.messages)
+                        self.messages = trim(self.messages, on_event=self.on_event)
                         continue
 
-                # 并行执行所有工具
                 async def _exec(tc, tool_name, tool_args):
                     tool = get_tool(tool_name)
                     if not tool:
@@ -129,10 +135,11 @@ class Agent:
                 )
 
                 for tc, tool_name, tool_args, result in results:
-                    print(f"[工具返回] ({tool_name}) {result}")
+                    await self._emit("tool_result", {
+                        "name": tool_name, "result": result,
+                    })
                     self.messages.append({
-                        "role": "assistant",
-                        "content": None,
+                        "role": "assistant", "content": None,
                         "tool_calls": [tc],
                     })
                     self.messages.append({
@@ -140,18 +147,17 @@ class Agent:
                         "tool_call_id": tc["id"],
                         "content": result,
                     })
-                self.messages = trim(self.messages)
+                self.messages = trim(self.messages, on_event=self.on_event)
                 continue
 
-            # LLM 决定直接回答 — 流式输出
             if content:
-                print("[Agent 回答] ", end="", flush=True)
+                await self._emit("answer_start", {})
                 for char in content:
-                    print(char, end="", flush=True)
-                print()
+                    await self._emit("token", {"text": char})
+                await self._emit("answer_end", {})
                 return content
 
-        print("\n[Agent 达到最大轮次限制，强制总结]")
+        await self._emit("max_turns", {})
         return await self._force_summarize()
 
     async def _force_summarize(self) -> str:
@@ -159,11 +165,9 @@ class Agent:
             "role": "user",
             "content": "你已经达到了最大思考轮次，请根据上述所有工具返回的结果，给用户一个总结回答。"
         })
-        self.messages = trim(self.messages)
+        self.messages = trim(self.messages, on_event=self.on_event)
         content, _ = await self._stream_llm()
         if content:
-            print("[Agent 总结] ", end="", flush=True)
             for char in content:
-                print(char, end="", flush=True)
-            print()
+                await self._emit("token", {"text": char})
         return content

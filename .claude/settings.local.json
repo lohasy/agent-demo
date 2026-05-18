@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -m pip install fastapi uvicorn -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn -q 2>&1)",
+      "PowerShell(npm create *)"
+    ]
+  }
+}

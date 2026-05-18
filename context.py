@@ -15,7 +15,8 @@ def estimate_tokens(messages: list[dict]) -> int:
     return int(total)
 
 
-def trim(messages: list[dict], max_tokens: int = MAX_TOKENS) -> list[dict]:
+def trim(messages: list[dict], max_tokens: int = MAX_TOKENS,
+         on_event=None) -> list[dict]:
     """超出上限时裁剪最早的非 system 消息对"""
     if len(messages) <= 1:
         return messages
@@ -29,6 +30,9 @@ def trim(messages: list[dict], max_tokens: int = MAX_TOKENS) -> list[dict]:
         trimmed += 2
 
     if trimmed:
-        print(f"[上下文] 裁剪了最早的 {trimmed} 条消息 (token 超限)")
+        if on_event:
+            on_event("context_trimmed", {"count": trimmed})
+        else:
+            print(f"[上下文] 裁剪了最早的 {trimmed} 条消息 (token 超限)")
 
     return system + rest
