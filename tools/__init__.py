@@ -1,7 +1,8 @@
 from .calculator import calculator_tool
 from .filesystem import filesystem_tool
+from .search_knowledge import knowledge_tool
 
-TOOLS = [calculator_tool, filesystem_tool]
+TOOLS = [calculator_tool, filesystem_tool, knowledge_tool]
 
 def get_tool(name: str):
     for t in TOOLS:

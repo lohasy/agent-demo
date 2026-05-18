@@ -1,10 +1,10 @@
 import asyncio
 import os
 from agent import Agent
+from rag_service import index_documents
 
 
 async def main():
-    # 通过环境变量配置 LLM 连接，默认连本地 Ollama
     base_url = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("LLM_MODEL", "deepseek-chat")
     api_key = os.getenv("DEEPSEEK_API_KEY", "sk-b129d5d0e73c4345be4bfd4388f358b9")
@@ -14,6 +14,8 @@ async def main():
         return
 
     print(f"LLM: {base_url} | 模型: {model}")
+    print("正在索引知识库文档...")
+    index_documents()
     print("输入 'quit' 退出\n")
 
     agent = Agent(base_url=base_url, model=model, api_key=api_key)
